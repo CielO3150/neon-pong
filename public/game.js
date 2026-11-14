@@ -1,81 +1,20 @@
-const socket = io();
-const $ = id => document.getElementById(id);
-const lobby = $("lobby"), game = $("game"), canvas = $("arena"), ctx = canvas.getContext("2d");
-let myIndex = 0, state = null, joined = false, lastMove = 0, pointerY = 260;
-
-function message(t){ $("lobbyMessage").textContent = t; }
-function enterGame(data){
-  myIndex = data.index; joined = true;
-  $("activeCode").textContent = data.code;
-  lobby.classList.add("hidden"); game.classList.remove("hidden");
-  $("overlay").textContent = myIndex === 0 ? "対戦相手を待っています…" : "";
-  $("playerLabels").textContent = `${$("playerName").value || "YOU"}　VS　OPPONENT`;
-}
-$("createBtn").onclick = () => socket.emit("createRoom",{name:$("playerName").value});
-$("joinBtn").onclick = () => socket.emit("joinRoom",{code:$("roomCode").value,name:$("playerName").value});
-$("copyBtn").onclick = async () => {
-  try { await navigator.clipboard.writeText($("activeCode").textContent); $("copyBtn").textContent="コピーしました"; }
-  catch { $("copyBtn").textContent="コード: "+$("activeCode").textContent; }
-};
-$("leaveBtn").onclick = () => location.reload();
-socket.on("joined", enterGame);
-socket.on("errorMessage", message);
-socket.on("state", s => {
-  state = s;
-  $("score").textContent = `${s.score[myIndex]} : ${s.score[1-myIndex]}`;
-  $("status").textContent = s.players.length < 2 ? "対戦相手を待っています" : "ONLINE MATCH";
-  if(s.players.length === 2 && s.ball.vx !== 0) $("overlay").textContent = "";
-  else if(s.players.length < 2) $("overlay").textContent = "対戦相手を待っています…";
-  else if(s.countdown > 0) $("overlay").textContent = "NEXT ROUND";
-  else $("overlay").textContent = "タップ / SPACE でスタート";
-});
-socket.on("opponentLeft", () => {
-  $("overlay").textContent = "相手が退出しました";
-  $("status").textContent = "対戦相手が退出";
-});
-socket.on("connect_error", () => message("サーバーに接続できません。時間をおいて再読み込みしてください。"));
-
-function sendMove(y){
-  if(!joined) return;
-  const now = performance.now();
-  if(now-lastMove > 25){ socket.emit("move", y); lastMove=now; }
-}
-function canvasY(clientY){
-  const r=canvas.getBoundingClientRect();
-  return (clientY-r.top)*canvas.height/r.height;
-}
-canvas.addEventListener("pointermove", e => sendMove(canvasY(e.clientY)));
-canvas.addEventListener("pointerdown", e => { sendMove(canvasY(e.clientY)); socket.emit("launch"); });
-window.addEventListener("keydown", e => {
-  if(e.code==="Space"){e.preventDefault();socket.emit("launch");}
-  if(e.code==="ArrowUp"||e.code==="ArrowDown"){
-    e.preventDefault(); pointerY += e.code==="ArrowUp"?-28:28; sendMove(pointerY);
-  }
-});
-
-function draw(){
-  const w=canvas.width,h=canvas.height;
-  ctx.clearRect(0,0,w,h);
-  const grad=ctx.createLinearGradient(0,0,w,h);grad.addColorStop(0,"#0c1b31");grad.addColorStop(1,"#071222");ctx.fillStyle=grad;ctx.fillRect(0,0,w,h);
-  ctx.strokeStyle="#263b59";ctx.setLineDash([9,12]);ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(w/2,0);ctx.lineTo(w/2,h);ctx.stroke();ctx.setLineDash([]);
-  // subtle court markings
-  ctx.strokeStyle="#1c304b";ctx.lineWidth=2;ctx.strokeRect(16,16,w-32,h-32);
-  if(state){
-    const ys=state.paddles;
-    drawPaddle(34,ys[0],"#55e6dc");drawPaddle(w-34,ys[1],"#ff668d");
-    const b=state.ball;
-    ctx.shadowBlur=22;ctx.shadowColor="#fff";ctx.fillStyle="#fff";ctx.beginPath();ctx.arc(b.x,b.y,11,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0;
-    if(state.players.length===2){
-      ctx.fillStyle="#7188a8";ctx.font="12px sans-serif";ctx.textAlign="center";
-      ctx.fillText(state.players[0].name,w*.25,30);ctx.fillText(state.players[1].name,w*.75,30);
-    }
-  } else {
-    ctx.fillStyle="#fff";ctx.beginPath();ctx.arc(w/2,h/2,11,0,Math.PI*2);ctx.fill();
-  }
-  requestAnimationFrame(draw);
-}
-function drawPaddle(x,y,color){
-  ctx.shadowBlur=18;ctx.shadowColor=color;ctx.fillStyle=color;
-  ctx.beginPath();ctx.roundRect(x-7,y-50,14,100,7);ctx.fill();ctx.shadowBlur=0;
-}
-draw();
+const socket=io(),$=id=>document.getElementById(id),canvas=$("arena"),ctx=canvas.getContext("2d");let myIndex=0,state=null,joined=false,lastMove=0,lastY=null;const W=900,H=520,PH=104;
+function msg(t){$("lobbyMessage").textContent=t}
+$("createBtn").onclick=()=>socket.emit("createRoom",{name:$("playerName").value});$("joinBtn").onclick=()=>socket.emit("joinRoom",{code:$("roomCode").value,name:$("playerName").value});$("leaveBtn").onclick=()=>location.reload();
+$("copyBtn").onclick=async()=>{try{await navigator.clipboard.writeText($("activeCode").textContent);$("copyBtn").textContent="コピーしました"}catch{$("copyBtn").textContent="コード: "+$("activeCode").textContent}};
+socket.on("joined",d=>{myIndex=d.index;joined=true;$("activeCode").textContent=d.code;$("lobby").classList.add("hidden");$("game").classList.remove("hidden");if(myIndex===0)$("ownerPanel").classList.remove("hidden")});
+socket.on("errorMessage",msg);socket.on("connect_error",()=>msg("サーバーに接続できません。再読み込みしてください。"));socket.on("opponentLeft",()=>{$("overlay").textContent="相手が退出しました";$("status").textContent="対戦相手が退出"});socket.on("matchEnded",()=>{$("overlay").textContent="MATCH FINISHED"});
+socket.on("pointEffect",d=>effect(d.scorer===myIndex));
+socket.on("state",s=>{state=s;$("score").textContent=`${s.score[myIndex]} : ${s.score[1-myIndex]}`;$("status").textContent=s.players.length<2?"対戦相手を待っています":s.finished?"試合終了":s.running?"MATCH IN PROGRESS":"次のラウンド待機中";$("ownerState").textContent=s.running?"試合中":s.finished?"試合終了":s.started?"一時停止":"開始前";if(s.players.length<2)$("overlay").textContent="対戦相手を待っています…";else if(s.finished)$("overlay").textContent="MATCH FINISHED";else if(s.running)$("overlay").textContent="";else $("overlay").textContent=s.started?"次のラウンドを待っています":"オーナーが試合を開始します";$("startBtn").disabled=s.players.length<2||s.running||s.finished;$("endBtn").disabled=!s.started||s.finished;$("resetBtn").disabled=false;let lock=s.running||(s.started&&!s.finished);$("settings").classList.toggle("settingsLocked",lock);$("settingsHint").textContent=lock?"試合中は設定を変更できません。":"試合開始前・終了後に設定できます。";if(myIndex===s.ownerIndex)syncConfig(s.config);applyTheme(s.config)});
+$("startBtn").onclick=()=>socket.emit("ownerAction","start");$("endBtn").onclick=()=>{if(confirm("試合を終了しますか？"))socket.emit("ownerAction","end")};$("resetBtn").onclick=()=>{if(confirm("ポイントと試合状態をリセットしますか？"))socket.emit("ownerAction","reset")};
+$("saveSettings").onclick=()=>socket.emit("updateConfig",{ballSpeed:+$("ballSpeed").value,accelerationOn:$("accelerationOn").checked,acceleration:+$("acceleration").value,mode:$("mode").value,limit:+$("limit").value,startBalls:+$("startBalls").value,multiplyBalls:$("multiplyBalls").checked,growthMode:$("growthMode").value,growthAmount:+$("growthAmount").value,exponential:$("exponential").checked,ballSize:+$("ballSize").value,accent:$("accent").value,background:$("background").value});
+function syncConfig(c){$("ballSpeed").value=c.ballSpeed;$("accelerationOn").checked=c.accelerationOn;$("acceleration").value=c.acceleration;$("mode").value=c.mode;$("limit").value=c.limit;$("startBalls").value=c.startBalls;$("multiplyBalls").checked=c.multiplyBalls;$("growthMode").value=c.growthMode;$("growthAmount").value=c.growthAmount;$("exponential").checked=c.exponential;$("ballSize").value=c.ballSize;$("accent").value=c.accent;$("background").value=c.background;outputs()}
+function outputs(){$("speedOut").value=$("ballSpeed").value;$("accelOut").value=$("acceleration").value;$("sizeOut").value=$("ballSize").value}["ballSpeed","acceleration","ballSize"].forEach(id=>$(id).addEventListener("input",outputs));
+function applyTheme(c){document.documentElement.style.setProperty("--bg",c.background);document.documentElement.style.setProperty("--cyan",c.accent)}
+function effect(won){let fx=$("fx");fx.className="fx "+(won?"good":"bad");fx.innerHTML="";if(won){let colors=["#55e6dc","#ff668d","#ffe66d","#9b8cff","#fff"];for(let i=0;i<36;i++){let p=document.createElement("i");p.className="burst";p.style.setProperty("--burst",colors[i%colors.length]);p.style.setProperty("--dx",`${Math.cos(i/36*Math.PI*2)*(100+Math.random()*280)}px`);p.style.setProperty("--dy",`${Math.sin(i/36*Math.PI*2)*(70+Math.random()*210)}px`);fx.appendChild(p)}}setTimeout(()=>{fx.className="fx";fx.innerHTML=""},950)}
+function sendMove(y){if(!joined)return;let n=performance.now();if(n-lastMove>25){socket.emit("move",y);lastMove=n}}
+function canvasY(y){let r=canvas.getBoundingClientRect();return(y-r.top)*canvas.height/r.height}
+canvas.addEventListener("pointermove",e=>sendMove(canvasY(e.clientY)));canvas.addEventListener("pointerdown",e=>{sendMove(canvasY(e.clientY));socket.emit("launch")});
+window.addEventListener("keydown",e=>{if(e.code==="Space"){e.preventDefault();socket.emit("launch")}if(e.code==="ArrowUp"||e.code==="ArrowDown"){e.preventDefault();let y=(lastY??state?.paddles[myIndex]??H/2)+(e.code==="ArrowUp"?-25:25);lastY=y;sendMove(y)}});
+function draw(){let c=state?.config||{background:"#0b1729",accent:"#55e6dc",ballSize:10};ctx.clearRect(0,0,W,H);ctx.fillStyle=c.background;ctx.fillRect(0,0,W,H);ctx.strokeStyle="#ffffff22";ctx.lineWidth=2;ctx.setLineDash([8,12]);ctx.beginPath();ctx.moveTo(W/2,0);ctx.lineTo(W/2,H);ctx.stroke();ctx.setLineDash([]);ctx.strokeStyle="#7186a5";ctx.lineWidth=8;ctx.strokeRect(4,4,W-8,H-8);if(state){drawPaddle(36,state.paddles[0],c.accent);drawPaddle(W-36,state.paddles[1],"#ff668d");for(let b of state.balls){ctx.shadowBlur=18;ctx.shadowColor=c.accent;ctx.fillStyle="#fff";ctx.beginPath();ctx.arc(b.x,b.y,b.radius||c.ballSize,0,Math.PI*2);ctx.fill();ctx.shadowBlur=0}if(state.players.length===2){ctx.fillStyle="#aabbd0";ctx.font="12px sans-serif";ctx.textAlign="center";ctx.fillText(state.players[0].name,W*.25,30);ctx.fillText(state.players[1].name,W*.75,30)}}requestAnimationFrame(draw)}
+function drawPaddle(x,y,color){ctx.shadowBlur=17;ctx.shadowColor=color;ctx.fillStyle=color;ctx.beginPath();ctx.roundRect(x-7,y-PH/2,14,PH,7);ctx.fill();ctx.shadowBlur=0}draw();
