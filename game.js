@@ -26,7 +26,7 @@ const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
 function createGame(settings) {
   return { phase: 'lobby', settings: { ...DEFAULTS, ...settings }, paddles: [H / 2, H / 2], scores: [0, 0],
-    base: [0, 0], balls: [], queue: [], spawnT: 0, timeLeft: 0, countdown: 0, serve: 0, lastLoser: null,
+    base: [0, 0], pp: [H / 2, H / 2], balls: [], queue: [], spawnT: 0, timeLeft: 0, countdown: 0, serve: 0, lastLoser: null,
     hits: 0, result: null, nid: 1 };
 }
 function setPaddle(g, i, y) {
@@ -55,9 +55,9 @@ function launch(g) {
 // 発射側プレイヤーのクリックで開始（サーバーが発射側かどうかを検証してから呼ぶ）
 function serveBall(g, ev) {
   if (g.phase !== 'ready') return false;
-  g.phase = 'playing'; launch(g); ev.push({ t: 'go' }); return true;
+  g.phase = 'playing'; g.pp = g.paddles.slice(); launch(g); ev.push({ t: 'go' }); return true;
 }
-function hit(g, b, side, ev) {
+function hit(g, b, side, face, ev) {
   const s = g.settings; g.hits++;
   ev.push({ t: 'hit', x: b.x, y: b.y, side });
   if (!s.mult) return;
@@ -66,39 +66,72 @@ function hit(g, b, side, ev) {
   if (n <= 0) return;
   const sp = Math.hypot(b.vx, b.vy), an = Math.atan2(b.vy, b.vx);
   for (let i = 0; i < n; i++) {
-    const a = an + (Math.random() - 0.5) * 1.2;
-    g.queue.push({ x: b.x, y: b.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp });
+    const a = an + (Math.random() - 0.5) * 1.2; let vx = Math.cos(a) * sp, vy = Math.sin(a) * sp;
+    if (face === 'y' ? vy * b.vy < 0 : vx * b.vx < 0) { if (face === 'y') vy = -vy; else vx = -vx; }  // バーの中へ向かう弾は作らない
+    g.queue.push({ x: b.x, y: b.y, vx, vy });
   }
   ev.push({ t: 'mult', x: b.x, y: b.y, n, side });
 }
-// 連続衝突判定: 1フレームを「次に起きる出来事」まで進める→処理→残り時間でまた進める
+// バーの当たり判定箱（弾の半径ぶん広げた長方形）[x0,x1,y0,y1]
+const box = (g, i) => {
+  const s = g.settings, r = s.ballSize, h = s.barH / 2 + r, y = g.paddles[i];
+  return i === 0 ? [PAD - r, PAD + s.barW + r, y - h, y + h] : [W - PAD - s.barW - r, W - PAD + r, y - h, y + h];
+};
+// face: front=前面 / back=背面 / y=上下の側面（dir: -1=上側, 1=下側）
+function paddleHit(g, b, i, face, dir, ev) {
+  const [x0, x1, y0, y1] = box(g, i), sp = Math.hypot(b.vx, b.vy), away = i === 0 ? 1 : -1;
+  if (face === 'front') {
+    const off = clamp((b.y - g.paddles[i]) / (g.settings.barH / 2 + g.settings.ballSize), -1, 1);
+    b.vy = sp * off * 0.75; b.vx = Math.sqrt(Math.max(0, sp * sp - b.vy * b.vy)) * away; b.x = i === 0 ? x1 : x0;
+  } else if (face === 'back') { b.vx = -away * (Math.abs(b.vx) || 1); b.x = i === 0 ? x0 : x1; }
+  else { b.vy = dir * (Math.abs(b.vy) || 1); b.y = dir < 0 ? y0 : y1; }
+  hit(g, b, i, face, ev);
+}
+// バーが動いて弾を飛び越えた場合（貫通対策）: 弾をバーの側面で跳ね返す
+function sweep(g, b, ev) {
+  for (let i = 0; i < 2; i++) {
+    const dy = g.paddles[i] - g.pp[i]; if (!dy) continue;
+    const [x0, x1, y0, y1] = box(g, i);
+    if (b.x > x0 && b.x < x1 && b.y > Math.min(y0, y0 - dy) && b.y < Math.max(y1, y1 - dy)) {
+      const dir = dy > 0 ? -1 : 1;
+      if (dir < 0) b.y = Math.min(b.y, y0); else b.y = Math.max(b.y, y1);
+      b.vy = dir * (Math.abs(b.vy) || 1); hit(g, b, i, 'y', ev); return;
+    }
+  }
+}
+// バーの箱の中に入っていたら外へ押し出す
+function resolve(g, b, ev) {
+  for (let i = 0; i < 2; i++) {
+    const [x0, x1, y0, y1] = box(g, i);
+    if (!(b.x > x0 && b.x < x1 && b.y > y0 && b.y < y1)) continue;
+    const d = [b.x - x0, x1 - b.x, b.y - y0, y1 - b.y], k = d.indexOf(Math.min(...d));
+    if (k < 2) paddleHit(g, b, i, (i === 0) === (k === 1) ? 'front' : 'back', 0, ev);
+    else paddleHit(g, b, i, 'y', k === 2 ? -1 : 1, ev);
+    return;
+  }
+}
+const slab = (p, v, lo, hi) => v ? (v > 0 ? [(lo - p) / v, (hi - p) / v] : [(hi - p) / v, (lo - p) / v]) : (p > lo && p < hi ? [-Infinity, Infinity] : null);
+// 連続衝突判定: 次に起きる出来事（壁・バーの前面/側面/背面・ゴール）まで進めて処理→残り時間でまた進める
 function moveBall(g, b, dt, ev) {
-  const s = g.settings, r = s.ballSize, h = s.barH / 2 + r;
-  const xl = PAD + s.barW + r, xr = W - PAD - s.barW - r;
-  let rem = dt;
+  const r = g.settings.ballSize; let rem = dt;
   for (let n = 0; n < MAX_EV && rem > 1e-9 && !b.dead; n++) {
-    let t = rem, k = null;
+    let t = rem, k = null, pi = 0, pf = '';
     if (b.vy < 0) { const tw = (b.y - r) / -b.vy; if (tw < t) { t = tw; k = 'w'; } }
     else if (b.vy > 0) { const tw = (H - r - b.y) / b.vy; if (tw < t) { t = tw; k = 'w'; } }
-    if (b.vx < 0) {
-      if (b.x >= xl - 1e-6) { const tp = (b.x - xl) / -b.vx;
-        if (tp < t && Math.abs(b.y + b.vy * tp - g.paddles[0]) <= h) { t = tp; k = 'p0'; } }
-      const tg = (b.x + r) / -b.vx; if (tg < t) { t = tg; k = 'g0'; }
-    } else if (b.vx > 0) {
-      if (b.x <= xr + 1e-6) { const tp = (xr - b.x) / b.vx;
-        if (tp < t && Math.abs(b.y + b.vy * tp - g.paddles[1]) <= h) { t = tp; k = 'p1'; } }
-      const tg = (W + r - b.x) / b.vx; if (tg < t) { t = tg; k = 'g1'; }
+    for (let i = 0; i < 2; i++) {
+      const [x0, x1, y0, y1] = box(g, i), X = slab(b.x, b.vx, x0, x1), Y = slab(b.y, b.vy, y0, y1);
+      if (!X || !Y) continue;
+      const en = Math.max(X[0], Y[0]);
+      if (en <= Math.min(X[1], Y[1]) && en >= -1e-9 && en < t) { t = en; k = 'p'; pi = i; pf = X[0] > Y[0] ? 'x' : 'y'; }
     }
+    if (b.vx < 0) { const tg = (b.x + r) / -b.vx; if (tg < t) { t = tg; k = 'g0'; } }
+    else if (b.vx > 0) { const tg = (W + r - b.x) / b.vx; if (tg < t) { t = tg; k = 'g1'; } }
     if (t < 0) t = 0;
     b.x += b.vx * t; b.y += b.vy * t; rem -= t;
     if (k === 'w') { b.vy = -b.vy; b.y = clamp(b.y, r, H - r); }
-    else if (k === 'p0' || k === 'p1') {
-      const i = k === 'p0' ? 0 : 1, sp = Math.hypot(b.vx, b.vy);
-      const off = clamp((b.y - g.paddles[i]) / h, -1, 1);
-      b.vy = sp * off * 0.75;
-      b.vx = Math.sqrt(Math.max(0, sp * sp - b.vy * b.vy)) * (i === 0 ? 1 : -1);
-      b.x = i === 0 ? xl : xr;
-      hit(g, b, i, ev);
+    else if (k === 'p') {
+      if (pf === 'y') paddleHit(g, b, pi, 'y', b.vy > 0 ? -1 : 1, ev);
+      else paddleHit(g, b, pi, (pi === 0) === (b.vx < 0) ? 'front' : 'back', 0, ev);
     } else if (k === 'g0' || k === 'g1') {
       const scorer = k === 'g0' ? 1 : 0;
       b.dead = true; g.scores[scorer]++; g.lastLoser = 1 - scorer; g.serve = 1 - scorer;
@@ -130,10 +163,11 @@ function step(g, dt, ev) {
   } else g.spawnT = 0;
   for (const b of g.balls) {
     if (b.dead) continue;
+    sweep(g, b, ev); resolve(g, b, ev);
     if (s.accel > 0) { const sp = Math.hypot(b.vx, b.vy) || 1, k = (sp + s.accel * dt) / sp; b.vx *= k; b.vy *= k; }
     moveBall(g, b, dt, ev);
   }
-  g.balls = g.balls.filter(b => !b.dead);
+  g.balls = g.balls.filter(b => !b.dead); g.pp = g.paddles.slice();
   if (s.mode === 'rounds' && (g.scores[0] - g.base[0] >= s.target || g.scores[1] - g.base[1] >= s.target)) return finish(g, ev);
   if (s.mode === 'time' && g.timeLeft <= 0) { g.timeLeft = 0; return finish(g, ev); }
   if (!g.balls.length && !g.queue.length) { beginRound(g); ev.push({ t: 'round' }); }
@@ -143,4 +177,4 @@ function snapshot(g) {
   return { ph: g.phase, sv: g.serve, tl: r1(g.timeLeft), sc: g.scores, pd: g.paddles.map(r1),
     b: g.balls.map(b => [r1(b.x), r1(b.y), r1(b.vx), r1(b.vy)]), q: g.queue.length };
 }
-module.exports = { W, H, PAD, SHAPES, DEFAULTS, sanitize, createGame, setPaddle, clampPaddles, startMatch, resetScores, step, snapshot, endMatch, serveBall };
+module.exports = { W, H, PAD, SHAPES, DEFAULTS, sanitize, createGame, setPaddle, clampPaddles, startMatch, resetScores, step, snapshot, endMatch, serveBall, box };

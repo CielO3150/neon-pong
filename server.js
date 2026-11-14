@@ -83,7 +83,7 @@ setInterval(() => {
     if (both && (g.phase === 'ready' || g.phase === 'playing')) {
       G.step(g, dt, r.ev); if (r.ev.length > 40) r.ev = r.ev.slice(-40);
       const ended = g.phase === 'ended';
-      if (ended || tick % 2 === 0) { io.to(r.id).emit('state', { ...G.snapshot(g), ev: r.ev }); r.ev = []; }
+      if (ended || tick % 2 === 0 || g.balls.length <= 30) { io.to(r.id).emit('state', { ...G.snapshot(g), ev: r.ev }); r.ev = []; }
       if (ended) emitRoom(r);
     } else if (!r.players.some(p => p.connected) && now - r.idle > 600000) rooms.delete(r.id);
   }

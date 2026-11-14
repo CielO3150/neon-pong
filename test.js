@@ -42,6 +42,23 @@ g = G.createGame({ accel: 0 }); g.lastLoser = 1; G.startMatch(g); g.paddles[1] =
 assert(G.snapshot(g).sv === 1); G.serveBall(g, []); G.step(g, 1 / 60, []);
 assert.equal(g.balls.length, 1); assert(g.balls[0].x > 900 && g.balls[0].vx < 0 && Math.abs(g.balls[0].y - 200) < 20);
 assert.equal(G.serveBall(g, []), false);   // 二重発射しない
+// バーの側面（上下）に当たっても反射する
+g = G.createGame({ mult: false, accel: 0 }); g.phase = 'playing'; g.timeLeft = 99; g.paddles = [300, 300];
+g.balls = [{ id: 1, x: 40, y: 230, vx: 0, vy: 500 }]; ev = []; G.step(g, 1 / 60, ev);
+assert(ev.some(e => e.t === 'hit') && g.balls[0].vy < 0 && g.balls[0].y < 236);
+// バーが弾を飛び越えるように動いても貫通しない
+g = G.createGame({ mult: false, accel: 0 }); g.phase = 'playing'; g.timeLeft = 99; g.paddles = [300, 300]; g.pp = [300, 300];
+g.balls = [{ id: 1, x: 40, y: 330, vx: 1, vy: 0 }]; G.setPaddle(g, 0, 450); ev = []; G.step(g, 1 / 60, ev);
+assert(ev.some(e => e.t === 'hit') && g.balls[0].vy < 0 && g.balls[0].y <= 386);
+// ランダム総当たり: バーが毎フレーム飛び回り高速弾が飛んでも、弾がバーの内部に残らない
+g = G.createGame({ mult: false, accel: 0 }); g.timeLeft = 1e9; let inside = 0;
+for (let n = 0; n < 5000; n++) {
+  g.phase = 'playing'; g.queue = [];
+  if (!g.balls.length) g.balls = [{ id: n, x: 500, y: 100 + Math.random() * 400, vx: (Math.random() < .5 ? -1 : 1) * (300 + Math.random() * 4000), vy: (Math.random() - .5) * 3000 }];
+  G.setPaddle(g, 0, Math.random() * 600); G.setPaddle(g, 1, Math.random() * 600); G.step(g, 1 / 60, []);
+  for (const b of g.balls) for (let i = 0; i < 2; i++) { const [x0, x1, y0, y1] = G.box(g, i); if (b.x > x0 + 1e-6 && b.x < x1 - 1e-6 && b.y > y0 + 1e-6 && b.y < y1 - 1e-6) inside++; }
+}
+assert.equal(inside, 0);
 // 設定値の検証
 const s = G.sanitize({ ballSpeed: 1e9, accel: 1e7, ballCount: 'x', barH: 99999, mode: 'bad' }, G.DEFAULTS);
 assert.equal(s.ballSpeed, 1e9); assert.equal(s.accel, 1e7); assert.equal(s.ballCount, 1); assert.equal(s.barH, 600); assert.equal(s.mode, 'time');
