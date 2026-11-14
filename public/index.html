@@ -9,7 +9,7 @@
 <main><nav id="nav"></nav><section id="panel"></section></main>
 <footer><button id="start"></button><button id="rst">得点リセット</button><button id="leave">退室</button></footer></div>
 <div id="game" class="screen"><div id="hud"></div><canvas id="cv" width="1000" height="600"></canvas>
-<div id="sub"><span>操作: マウス/タッチ/W S ↑ ↓</span><label>演出 <select id="fxsel"><option value="high">強</option><option value="low">弱</option><option value="off">なし</option></select></label></div>
+<div id="sub"><button id="endbtn" style="display:none;min-height:30px;padding:2px 10px">試合を終了</button><span>操作: マウス/タッチ/W S ↑ ↓</span><label>演出 <select id="fxsel"><option value="high">強</option><option value="low">弱</option><option value="off">なし</option></select></label></div>
 <div id="endcard"></div></div>
 <div id="flash"></div><div id="banner"></div><canvas id="fxc"></canvas>
 <script src="/socket.io/socket.io.js"></script><script src="client.js"></script></body></html>

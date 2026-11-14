@@ -16,6 +16,7 @@ $('fxsel').onchange = e => { fx = e.target.value; localStorage.fx = fx; };
 const nm = () => { localStorage.name = $('name').value; return $('name').value || 'PLAYER'; };
 $('create').onclick = () => S.emit('create', { name: nm(), token: tk });
 $('join').onclick = () => S.emit('join', { id: $('rid').value, name: nm(), token: tk });
+$('endbtn').onclick = () => { if (confirm('試合を終了しますか？（現在の得点で勝敗が決まります）')) S.emit('endmatch'); };
 $('start').onclick = () => S.emit('start'); $('rst').onclick = () => S.emit('reset');
 $('leave').onclick = () => { S.emit('leave'); room = null; st = null; view = 'home'; show(); };
 S.on('err', m => { $('err').textContent = m; if (view !== 'home') alert(m); });
@@ -83,9 +84,10 @@ function renderEnd() {
 // ---------- 入力 ----------
 const cv = $('cv'), c = cv.getContext('2d');
 const mv = e => { const r = cv.getBoundingClientRect(); myY = (e.clientY - r.top) / r.height * H; e.preventDefault(); };
-cv.addEventListener('pointermove', mv); cv.addEventListener('pointerdown', mv);
+cv.addEventListener('pointermove', mv); cv.addEventListener('pointerdown', e => { mv(e); trySrv(); });
+function trySrv() { if (st && st.ph === 'ready' && st.sv === me) S.emit('serve'); }
 const kn = e => e.key.length === 1 ? e.key.toLowerCase() : e.key;
-addEventListener('keydown', e => { if (view === 'game' && ['w', 's', 'ArrowUp', 'ArrowDown'].includes(kn(e))) { keys[kn(e)] = 1; e.preventDefault(); } });
+addEventListener('keydown', e => { if (view === 'game' && (e.key === ' ' || e.key === 'Enter')) { trySrv(); e.preventDefault(); } if (view === 'game' && ['w', 's', 'ArrowUp', 'ArrowDown'].includes(kn(e))) { keys[kn(e)] = 1; e.preventDefault(); } });
 addEventListener('keyup', e => delete keys[kn(e)]);
 // ---------- 演出 ----------
 const fxc = $('fxc'), fc = fxc.getContext('2d'); let P = [], R = [];
@@ -156,7 +158,15 @@ function draw() {
     const t = Math.min(.1, (performance.now() - stAt) / 1000);
     c.save(); c.fillStyle = '#fff'; c.shadowColor = '#fff'; c.shadowBlur = 16;
     for (const b of st.b) { c.beginPath(); c.arc(b[0] + b[2] * t, b[1] + b[3] * t, s.ballSize, 0, 6.283); c.fill(); } c.restore();
-    if (st.ph === 'ready') { c.fillStyle = '#fff'; c.font = 'bold 120px system-ui'; c.fillText(Math.ceil(st.cd), W / 2, H / 2 + 40); c.font = '24px system-ui'; c.fillText('今のうちにバーを動かせます', W / 2, H / 2 + 90); }
+    if (st.ph === 'ready') {   // 発射待ち: 弾を発射側のバー先端に表示
+      const i = st.sv, r = s.ballSize, x = i ? W - 30 - s.barW - r : 30 + s.barW + r, y = i === me ? myY : st.pd[i];
+      c.save(); c.fillStyle = '#fff'; c.shadowColor = pl[i].accent; c.shadowBlur = 28; c.beginPath(); c.arc(x, y, r, 0, 6.283); c.fill(); c.restore();
+      c.textAlign = 'center'; c.fillStyle = '#fff'; c.font = 'bold 20px system-ui';
+      if (s.ballCount > 1) c.fillText('×' + s.ballCount, x, y - r - 10);
+      c.fillStyle = pl[i].accent; c.font = 'bold 34px system-ui';
+      c.fillText(i === me ? 'クリック / タップ / スペースで発射！' : pl[i].name + ' の発射を待っています…', W / 2, H / 2 + 12);
+      c.fillStyle = '#fff9'; c.font = '20px system-ui'; c.fillText('発射前もバーを動かせます', W / 2, H / 2 + 48);
+    }
     if (st.q) { c.font = '20px system-ui'; c.fillStyle = '#fff9'; c.fillText('出現待ち ' + st.q, W / 2, H - 14); }
   }
   if (pl.some(p => !p.connected) || pl.length < 2) { c.fillStyle = '#000b'; c.fillRect(0, 0, W, H); c.fillStyle = '#fff'; c.font = 'bold 44px system-ui'; c.fillText('相手の接続待ち…', W / 2, H / 2); }
@@ -172,6 +182,7 @@ function loop(now) {
   drawFx(dt);
   if (view !== 'game' || !room) return;
   if (keys.w || keys.ArrowUp) myY -= 650 * dt; if (keys.s || keys.ArrowDown) myY += 650 * dt;
+  $('endbtn').style.display = me === 0 && room.phase !== 'ended' ? '' : 'none';
   draw(); hud();
   cv.style.transform = shake > .5 ? `translate(${(Math.random() - .5) * shake}px,${(Math.random() - .5) * shake}px)` : ''; shake *= .88;
   if (now - sent > 16) { sent = now; S.volatile.emit('paddle', myY); }   // ラウンド前の待機中も送信
