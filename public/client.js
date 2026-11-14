@@ -1,4 +1,6 @@
 'use strict';
+let FG = '#fff';
+const lum = h => { const n = parseInt(h.slice(1), 16); return (.299 * (n >> 16) + .587 * (n >> 8 & 255) + .114 * (n & 255)) / 255; };
 const S = io(), $ = i => document.getElementById(i), W = 1000, H = 600;
 const tk = localStorage.tk || (localStorage.tk = Math.random().toString(36).slice(2) + Date.now().toString(36));
 let room = null, me = 0, view = 'home', st = null, stAt = 0, myY = 300, fx = localStorage.fx || 'high', cat = 0, sent = 0, keys = {}, last = 0, shake = 0, hudKey = '';
@@ -17,14 +19,19 @@ const nm = () => { localStorage.name = $('name').value; return $('name').value |
 $('create').onclick = () => S.emit('create', { name: nm(), token: tk });
 $('join').onclick = () => S.emit('join', { id: $('rid').value, name: nm(), token: tk });
 $('endbtn').onclick = () => { if (confirm('試合を終了しますか？（現在の得点で勝敗が決まります）')) S.emit('endmatch'); };
-$('start').onclick = () => S.emit('start'); $('rst').onclick = () => S.emit('reset');
-$('leave').onclick = () => { S.emit('leave'); room = null; st = null; view = 'home'; show(); };
+$('start').onclick = () => S.emit('start');
+$('rst').onclick = () => { if (confirm('【注意】両プレイヤーの得点が 0 - 0 に戻ります。この操作は元に戻せません。\n\n得点をリセットしますか？')) S.emit('reset'); };
+const doLeave = () => { if (confirm(me === 0 ? '退室するとルームが閉じられます。退室しますか？' : '退室しますか？（試合から抜けます）')) { S.emit('leave'); room = null; st = null; view = 'home'; show(); } };
+$('leave').onclick = doLeave; $('gleave').onclick = doLeave;
+$('copy').onclick = async () => { const t = $('roomid').value; try { await navigator.clipboard.writeText(t); } catch { $('roomid').select(); document.execCommand('copy'); }
+  $('copy').textContent = 'コピーしました ✓'; setTimeout(() => $('copy').textContent = 'コピー', 1500); };
+$('roomid').onclick = e => e.target.select();
 S.on('err', m => { $('err').textContent = m; if (view !== 'home') alert(m); });
 S.on('joined', d => { me = d.idx; $('err').textContent = ''; });
 S.on('closed', () => { alert('オーナーが退室したためルームが閉じられました'); room = null; view = 'home'; show(); });
 S.on('connect', () => { if (room) S.emit('join', { id: room.id, name: nm(), token: tk }); });   // 再接続
 S.on('room', r => {
-  room = r;
+  room = r; if (r.phase === 'lobby') { st = null; hudKey = ''; }
   if (r.phase === 'ready' || r.phase === 'playing') view = 'game';
   else if (r.phase === 'lobby' || view === 'home') view = 'lobby';
   show(); renderLobby(); renderEnd();
@@ -39,7 +46,11 @@ $('panel').addEventListener('focusout', () => setTimeout(renderLobby, 80));
 
 function show() {
   for (const s of ['home', 'lobby', 'game']) $(s).classList.toggle('on', s === view);
-  if (room) { const mp = room.players[me] || room.players[0]; document.documentElement.style.setProperty('--bg', mp.bg); document.documentElement.style.setProperty('--ac', mp.accent); }
+  if (!room) return;
+  const mp = room.players[me] || room.players[0], light = lum(mp.bg) > .55, R = document.documentElement.style; FG = light ? '#000' : '#fff';   // 背景の明るさで文字色を白/黒に
+  R.setProperty('--bg', mp.bg); R.setProperty('--ac', mp.accent); R.setProperty('--fg', FG);
+  R.setProperty('--pn', light ? 'rgba(255,255,255,.55)' : 'rgba(0,0,0,.35)'); R.setProperty('--sf', light ? 'rgba(0,0,0,.06)' : 'rgba(255,255,255,.08)');
+  R.setProperty('--ln', light ? 'rgba(0,0,0,.06)' : 'rgba(255,255,255,.03)'); R.setProperty('--oa', lum(mp.accent) > .55 ? '#000' : '#fff');
 }
 function pf(pl, mine) {
   const d = mine ? '' : 'disabled', a = mine ? ' data-p=' : ' data-x=';
@@ -50,8 +61,8 @@ function pf(pl, mine) {
 }
 function renderLobby() {
   if (!room || view === 'home') return;
-  $('roomid').textContent = room.id;
-  $('pst').innerHTML = [0, 1].map(i => { const p = room.players[i]; return p ? `<span style="color:${p.accent}">${p.connected ? '●' : '○切断中'} ${esc(p.name)}${i ? '' : '（オーナー）'}</span>` : '<span style="opacity:.6">○ 相手を待っています…</span>'; }).join('　');
+  $('roomid').value = room.id;
+  $('pst').innerHTML = [0, 1].map(i => { const p = room.players[i]; return p ? `<span style="border-bottom:3px solid ${p.accent}">${p.connected ? '●' : '○切断中'} ${esc(p.name)}${i ? '' : '（オーナー）'}</span>` : '<span style="opacity:.6">○ 相手を待っています…</span>'; }).join('　');
   $('nav').innerHTML = SCHEMA.map((c, i) => `<button class="${i === cat ? 'on' : ''}" data-c="${i}">${c[0]}</button>`).join('');
   $('nav').querySelectorAll('button').forEach(b => b.onclick = () => { cat = +b.dataset.c; renderLobby(); });
   const ed = room.phase === 'lobby' || room.phase === 'ended', own = me === 0 && ed;
@@ -83,8 +94,10 @@ function renderEnd() {
 }
 // ---------- 入力 ----------
 const cv = $('cv'), c = cv.getContext('2d');
-const mv = e => { const r = cv.getBoundingClientRect(); myY = (e.clientY - r.top) / r.height * H; e.preventDefault(); };
-cv.addEventListener('pointermove', mv); cv.addEventListener('pointerdown', e => { mv(e); trySrv(); });
+const inUI = e => e.target.closest && e.target.closest('button,select,input,#endcard');
+const mv = e => { if (view !== 'game' || inUI(e)) return false; const r = cv.getBoundingClientRect(); myY = (e.clientY - r.top) / r.height * H; return true; };
+addEventListener('pointermove', mv);   // 画面のどこでも追従（キャンバスの外でも）
+addEventListener('pointerdown', e => { if (mv(e)) trySrv(); });
 function trySrv() { if (st && st.ph === 'ready' && st.sv === me) S.emit('serve'); }
 const kn = e => e.key.length === 1 ? e.key.toLowerCase() : e.key;
 addEventListener('keydown', e => { if (view === 'game' && (e.key === ' ' || e.key === 'Enter')) { trySrv(); e.preventDefault(); } if (view === 'game' && ['w', 's', 'ArrowUp', 'ArrowDown'].includes(kn(e))) { keys[kn(e)] = 1; e.preventDefault(); } });
@@ -110,15 +123,15 @@ function banner(t, col) {
 function onEv(e) {
   if (!room) return; const ac = i => room.players[i].accent;
   if (e.t === 'hit') burst(e.side === 0 ? 40 : 960, e.y, ac(e.side), 14);
-  else if (e.t === 'spawn') burst(e.x, e.y, '#ffffff', 8, 160);
+  else if (e.t === 'spawn') burst(e.x, e.y, FG, 8, 160);
   else if (e.t === 'mult') { ring(e.x, e.y, ac(e.side)); burst(e.x, e.y, ac(e.side), 50, 450); flash(ac(e.side), .3); banner('+' + e.n, ac(e.side)); }
   else if (e.t === 'score') {
     flash(ac(e.side), .75); shake = 16; ring(e.side === 0 ? 1000 : 0, e.y, ac(e.side)); banner('POINT!', ac(e.side));
     for (let i = 0; i < 8; i++) burst(Math.random() * W, Math.random() * H, ac(e.side), 40, 500);
-  } else if (e.t === 'go') { flash('#ffffff', .5); banner('GO!', '#fff'); }
+  } else if (e.t === 'go') { flash(FG, .5); banner('GO!', FG); }
   else if (e.t === 'round') banner('NEXT ROUND', ac(0));
   else if (e.t === 'end') {
-    const col = e.winner < 0 ? '#fff' : ac(e.winner); flash(col, .9); banner(e.winner < 0 ? 'DRAW' : 'FINISH!', col);
+    const col = e.winner < 0 ? FG : ac(e.winner); flash(col, .9); banner(e.winner < 0 ? 'DRAW' : 'FINISH!', col);
     for (let i = 0; i < 14; i++) setTimeout(() => { burst(Math.random() * W, Math.random() * H, i % 2 ? ac(0) : ac(1), 90, 600); ring(Math.random() * W, Math.random() * H, col); }, i * 150);
   }
 }
@@ -140,34 +153,39 @@ function bar(x, y, w, h, sh, col) {
   else c.roundRect(x, t, w, h, Math.min(6, w / 2));
   c.fill(); c.restore();
 }
+// 受信と受信の間の弾位置の予測。壁・バーで折り返して描画上のすり抜けを防ぐ
+function pred(b, t, s, pd) {
+  const r = s.ballSize, h = s.barH / 2 + r, xl = 30 + s.barW + r, xr = W - 30 - s.barW - r, H2 = H - 2 * r;
+  let x = b[0] + b[2] * t, y = b[1] + b[3] * t, yy = (y - r) % (2 * H2); if (yy < 0) yy += 2 * H2; y = (yy > H2 ? 2 * H2 - yy : yy) + r;
+  if (b[2] < 0 && b[0] >= xl && x < xl && Math.abs(y - pd[0]) <= h) x = 2 * xl - x;
+  else if (b[2] > 0 && b[0] <= xr && x > xr && Math.abs(y - pd[1]) <= h) x = 2 * xr - x;
+  return [x, y];
+}
 function draw() {
-  const s = room.settings, pl = room.players, mp = pl[me];
-  c.fillStyle = mp.bg; c.fillRect(0, 0, W, H);
+  const s = room.settings, pl = room.players, mp = pl[me], hh = s.barH / 2;
+  myY = Math.max(hh, Math.min(H - hh, myY));
+  const pdl = [0, 1].map(i => i === me ? myY : st ? st.pd[i] : 300);
+  c.textAlign = 'center'; c.fillStyle = mp.bg; c.fillRect(0, 0, W, H);
   c.fillStyle = pl[0].accent + '14'; c.fillRect(0, 0, W / 2, H);
   if (pl[1]) { c.fillStyle = pl[1].accent + '14'; c.fillRect(W / 2, 0, W / 2, H); }
   c.strokeStyle = mp.accent + '66'; c.setLineDash([14, 12]); c.lineWidth = 3; c.beginPath(); c.moveTo(W / 2, 0); c.lineTo(W / 2, H); c.stroke(); c.setLineDash([]);
   const sc = st ? st.sc : room.scores;
-  c.font = 'bold 150px system-ui'; c.textAlign = 'center'; c.globalAlpha = .12; c.fillStyle = pl[0].accent; c.fillText(sc[0], W * .25, 300);
+  c.font = 'bold 150px system-ui'; c.globalAlpha = .12; c.fillStyle = pl[0].accent; c.fillText(sc[0], W * .25, 300);
   if (pl[1]) { c.fillStyle = pl[1].accent; c.fillText(sc[1], W * .75, 300); } c.globalAlpha = 1;
-  const hh = s.barH / 2; myY = Math.max(hh, Math.min(H - hh, myY));
-  for (let i = 0; i < 2; i++) {
-    if (!pl[i]) continue; const y = i === me ? myY : st ? st.pd[i] : 300;
-    bar(i ? W - 30 - s.barW : 30, y, s.barW, s.barH, pl[i].shape, pl[i].accent);
-  }
+  for (let i = 0; i < 2; i++) if (pl[i]) bar(i ? W - 30 - s.barW : 30, pdl[i], s.barW, s.barH, pl[i].shape, pl[i].accent);
   if (st) {
     const t = Math.min(.1, (performance.now() - stAt) / 1000);
-    c.save(); c.fillStyle = '#fff'; c.shadowColor = '#fff'; c.shadowBlur = 16;
-    for (const b of st.b) { c.beginPath(); c.arc(b[0] + b[2] * t, b[1] + b[3] * t, s.ballSize, 0, 6.283); c.fill(); } c.restore();
+    c.save(); c.fillStyle = FG; c.shadowColor = FG; c.shadowBlur = 16;
+    for (const b of st.b) { const [x, y] = pred(b, t, s, pdl); c.beginPath(); c.arc(x, y, s.ballSize, 0, 6.283); c.fill(); } c.restore();
     if (st.ph === 'ready') {   // 発射待ち: 弾を発射側のバー先端に表示
-      const i = st.sv, r = s.ballSize, x = i ? W - 30 - s.barW - r : 30 + s.barW + r, y = i === me ? myY : st.pd[i];
-      c.save(); c.fillStyle = '#fff'; c.shadowColor = pl[i].accent; c.shadowBlur = 28; c.beginPath(); c.arc(x, y, r, 0, 6.283); c.fill(); c.restore();
-      c.textAlign = 'center'; c.fillStyle = '#fff'; c.font = 'bold 20px system-ui';
-      if (s.ballCount > 1) c.fillText('×' + s.ballCount, x, y - r - 10);
-      c.fillStyle = pl[i].accent; c.font = 'bold 34px system-ui';
+      const i = st.sv, r = s.ballSize, x = i ? W - 30 - s.barW - r : 30 + s.barW + r, y = pdl[i];
+      c.save(); c.fillStyle = FG; c.shadowColor = pl[i].accent; c.shadowBlur = 28; c.beginPath(); c.arc(x, y, r, 0, 6.283); c.fill(); c.restore();
+      c.fillStyle = FG; c.font = 'bold 20px system-ui'; if (s.ballCount > 1) c.fillText('×' + s.ballCount, x, y - r - 10);
+      c.save(); c.shadowColor = mp.bg; c.shadowBlur = 8; c.fillStyle = pl[i].accent; c.font = 'bold 34px system-ui';
       c.fillText(i === me ? 'クリック / タップ / スペースで発射！' : pl[i].name + ' の発射を待っています…', W / 2, H / 2 + 12);
-      c.fillStyle = '#fff9'; c.font = '20px system-ui'; c.fillText('発射前もバーを動かせます', W / 2, H / 2 + 48);
+      c.fillStyle = FG; c.font = '20px system-ui'; c.globalAlpha = .7; c.fillText('発射前もバーを動かせます', W / 2, H / 2 + 48); c.restore();
     }
-    if (st.q) { c.font = '20px system-ui'; c.fillStyle = '#fff9'; c.fillText('出現待ち ' + st.q, W / 2, H - 14); }
+    if (st.q) { c.font = '20px system-ui'; c.fillStyle = FG; c.globalAlpha = .6; c.fillText('出現待ち ' + st.q, W / 2, H - 14); c.globalAlpha = 1; }
   }
   if (pl.some(p => !p.connected) || pl.length < 2) { c.fillStyle = '#000b'; c.fillRect(0, 0, W, H); c.fillStyle = '#fff'; c.font = 'bold 44px system-ui'; c.fillText('相手の接続待ち…', W / 2, H / 2); }
 }
@@ -175,7 +193,7 @@ function hud() {
   const pl = room.players, sc = st ? st.sc : room.scores, s = room.settings;
   const tl = st ? Math.max(0, Math.ceil(st.tl)) : s.timeLimit, mid = s.mode === 'time' ? `⏱ ${Math.floor(tl / 60)}:${String(tl % 60).padStart(2, '0')}` : `先取 +${s.target}点`;
   const k = [sc, mid, pl.map(p => p.name)].join('|'); if (k === hudKey) return; hudKey = k;
-  $('hud').innerHTML = `<span style="color:${pl[0].accent}">${esc(pl[0].name)} <b>${sc[0]}</b></span><span>${mid}</span><span style="color:${pl[1] ? pl[1].accent : '#fff'}"><b>${sc[1]}</b> ${pl[1] ? esc(pl[1].name) : ''}</span>`;
+  $('hud').innerHTML = `<span style="border-bottom:3px solid ${pl[0].accent}">${esc(pl[0].name)} <b>${sc[0]}</b></span><span>${mid}</span><span style="border-bottom:3px solid ${pl[1] ? pl[1].accent : 'transparent'}"><b>${sc[1]}</b> ${pl[1] ? esc(pl[1].name) : ''}</span>`;
 }
 function loop(now) {
   requestAnimationFrame(loop); const dt = Math.min(.05, (now - last) / 1000); last = now;

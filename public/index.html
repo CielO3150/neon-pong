@@ -5,11 +5,12 @@
 <label class="f"><span>プレイヤー名</span><input id="name" maxlength="12" placeholder="なまえ"></label>
 <button id="create">ルームを作成</button>
 <div class="row"><input id="rid" placeholder="ルームID" maxlength="5"><button id="join">参加</button></div><p id="err"></p></div>
-<div id="lobby" class="screen"><header><b>ROOM <span id="roomid"></span></b><span id="pst"></span></header>
+<div id="lobby" class="screen"><header><span id="rc"><b>ROOM</b> <input id="roomid" readonly aria-label="ルームコード"> <button id="copy">コピー</button></span><span id="pst"></span></header>
 <main><nav id="nav"></nav><section id="panel"></section></main>
 <footer><button id="start"></button><button id="rst">得点リセット</button><button id="leave">退室</button></footer></div>
-<div id="game" class="screen"><div id="hud"></div><canvas id="cv" width="1000" height="600"></canvas>
-<div id="sub"><button id="endbtn" style="display:none;min-height:30px;padding:2px 10px">試合を終了</button><span>操作: マウス/タッチ/W S ↑ ↓</span><label>演出 <select id="fxsel"><option value="high">強</option><option value="low">弱</option><option value="off">なし</option></select></label></div>
+<div id="game" class="screen"><div id="bar"><button id="endbtn" style="display:none">試合を終了</button><button id="gleave">退室</button>
+<label>演出 <select id="fxsel"><option value="high">強</option><option value="low">弱</option><option value="off">なし</option></select></label></div>
+<div id="hud"></div><canvas id="cv" width="1000" height="600"></canvas>
 <div id="endcard"></div></div>
 <div id="flash"></div><div id="banner"></div><canvas id="fxc"></canvas>
 <script src="/socket.io/socket.io.js"></script><script src="client.js"></script></body></html>
