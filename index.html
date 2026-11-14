@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>RICOCHET DUEL</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div class="eyebrow">REAL-TIME ONLINE GAME</div>
+      <h1>RICOCHET <span>DUEL</span></h1>
+      <p class="sub">ボールをはじき返して、相手のゴールを狙え。</p>
+    </header>
+
+    <section id="lobby" class="panel">
+      <h2>対戦ルーム</h2>
+      <label>プレイヤー名<input id="playerName" maxlength="14" value="Player"></label>
+      <div class="actions">
+        <button id="createBtn" class="primary">ルームを作成</button>
+        <div class="join">
+          <input id="roomCode" maxlength="4" placeholder="コード">
+          <button id="joinBtn">参加する</button>
+        </div>
+      </div>
+      <p id="lobbyMessage" class="message">ルームを作成するか、友達のコードを入力してください。</p>
+      <div class="howto">
+        <b>操作方法</b>
+        <span>マウス / タッチ / ↑ ↓ キーでパドルを移動</span>
+        <span>ボールが止まったら「スペース」または画面タップで再開</span>
+      </div>
+    </section>
+
+    <section id="game" class="game hidden">
+      <div class="gamebar">
+        <div><small>ROOM</small><strong id="activeCode">----</strong></div>
+        <div class="score"><strong id="score">0 : 0</strong><small id="status">対戦相手を待っています</small></div>
+        <button id="copyBtn" class="subtle">コードをコピー</button>
+      </div>
+      <div class="arena-wrap">
+        <canvas id="arena" width="900" height="520" aria-label="対戦ゲーム画面"></canvas>
+        <div id="overlay" class="overlay">対戦相手を待っています…</div>
+      </div>
+      <div class="below">
+        <span id="playerLabels">YOU　VS　OPPONENT</span>
+        <button id="leaveBtn" class="subtle">ロビーに戻る</button>
+      </div>
+    </section>
+    <footer>1対1オンライン対戦 ・ 同じルームコードを共有して遊ぼう</footer>
+  </main>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
