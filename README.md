@@ -1,2 +1,0 @@
-# RICOCHET-DUEL
-たまあそび
