@@ -5,7 +5,8 @@ let g = G.createGame(); G.startMatch(g);
 run(g, 1); assert.equal(g.phase, 'ready'); assert.equal(g.timeLeft, g.settings.timeLimit);
 G.setPaddle(g, 0, 400); assert.equal(g.paddles[0], 400);          // 待機中も動かせる
 G.setPaddle(g, 0, -999); assert.equal(g.paddles[0], g.settings.barH / 2);   // 範囲外に出ない
-run(g, 3); assert.equal(g.phase, 'playing'); assert(g.timeLeft < g.settings.timeLimit);
+run(g, 5); assert.equal(g.phase, 'ready'); assert.equal(g.timeLeft, g.settings.timeLimit);   // クリックするまで始まらない
+G.serveBall(g, []); run(g, 1); assert.equal(g.phase, 'playing'); assert(g.timeLeft < g.settings.timeLimit);
 // 極端な速度でもすり抜けず、止まらない
 g = G.createGame({ ballSpeed: 1e6, mult: false }); g.phase = 'playing'; g.timeLeft = 99;
 g.balls = [{ id: 1, x: 500, y: 300, vx: -1e6, vy: 0 }]; let ev = [];
@@ -30,8 +31,17 @@ g = G.createGame(); g.scores = [3, 2]; g.lastLoser = 1; g.phase = 'ended'; g.tim
 assert.deepEqual(g.scores, [3, 2]); assert.equal(g.serve, 1); assert.equal(g.timeLeft, 120); assert.equal(g.phase, 'ready');
 // ラウンド制は再開後の「今回の得点」で判定
 g = G.createGame({ mode: 'rounds', target: 2, mult: false }); g.scores = [5, 0]; g.lastLoser = 1; G.startMatch(g);
-run(g, 3.1); assert.equal(g.phase, 'playing'); g.balls = [{ id: 9, x: 900, y: 300, vx: 2000, vy: 0 }]; g.paddles[1] = 50;
+G.serveBall(g, []); g.queue = []; assert.equal(g.phase, 'playing'); g.balls = [{ id: 9, x: 900, y: 300, vx: 2000, vy: 0 }]; g.paddles[1] = 50;
 run(g, 0.3); assert.equal(g.scores[0], 6);
+// オーナーによる強制終了
+g = G.createGame(); G.startMatch(g); g.scores = [1, 0]; ev = []; G.endMatch(g, ev);
+assert.equal(g.phase, 'ended'); assert.equal(g.result.winner, 0); assert(ev.some(e => e.t === 'end'));
+G.endMatch(g, ev); assert.equal(ev.length, 1);   // 終了後は何も起きない
+// 発射位置: 失点した側（右）のバーの先端から、相手（左）へ向かう
+g = G.createGame({ accel: 0 }); g.lastLoser = 1; G.startMatch(g); g.paddles[1] = 200; assert.equal(g.serve, 1);
+assert(G.snapshot(g).sv === 1); G.serveBall(g, []); G.step(g, 1 / 60, []);
+assert.equal(g.balls.length, 1); assert(g.balls[0].x > 900 && g.balls[0].vx < 0 && Math.abs(g.balls[0].y - 200) < 20);
+assert.equal(G.serveBall(g, []), false);   // 二重発射しない
 // 設定値の検証
 const s = G.sanitize({ ballSpeed: 1e9, accel: 1e7, ballCount: 'x', barH: 99999, mode: 'bad' }, G.DEFAULTS);
 assert.equal(s.ballSpeed, 1e9); assert.equal(s.accel, 1e7); assert.equal(s.ballCount, 1); assert.equal(s.barH, 600); assert.equal(s.mode, 'time');

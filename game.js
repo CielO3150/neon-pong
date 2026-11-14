@@ -35,7 +35,7 @@ function setPaddle(g, i, y) {
   g.paddles[i] = clamp(y, h, H - h);
 }
 function clampPaddles(g) { setPaddle(g, 0, g.paddles[0]); setPaddle(g, 1, g.paddles[1]); }
-function beginRound(g) { g.phase = 'ready'; g.countdown = 3; g.balls = []; g.queue = []; g.spawnT = 0; }
+function beginRound(g) { g.phase = 'ready'; g.countdown = 0; g.balls = []; g.queue = []; g.spawnT = 0; }
 function resetScores(g) { g.scores = [0, 0]; g.base = [0, 0]; g.lastLoser = null; }
 // 再開: 得点は保持。時間・ラウンド情報だけ初期化。発射側は直前の失点側（初回はオーナー=0）
 function startMatch(g) {
@@ -48,9 +48,14 @@ function launch(g) {
   const s = g.settings, dir = g.serve === 0 ? 1 : -1;
   for (let i = 0; i < s.ballCount; i++) {
     const a = (Math.random() - 0.5) * 0.8;
-    g.queue.push({ x: W / 2, y: H / 2, vx: Math.cos(a) * s.ballSpeed * dir, vy: Math.sin(a) * s.ballSpeed });
+    g.queue.push({ srv: g.serve, vx: Math.cos(a) * s.ballSpeed * dir, vy: Math.sin(a) * s.ballSpeed });  // 発射側のバーから出す
   }
   g.spawnT = 0;
+}
+// 発射側プレイヤーのクリックで開始（サーバーが発射側かどうかを検証してから呼ぶ）
+function serveBall(g, ev) {
+  if (g.phase !== 'ready') return false;
+  g.phase = 'playing'; launch(g); ev.push({ t: 'go' }); return true;
 }
 function hit(g, b, side, ev) {
   const s = g.settings; g.hits++;
@@ -108,19 +113,18 @@ function finish(g, ev) {
   g.result = { winner: d0 > d1 ? 0 : d1 > d0 ? 1 : -1 };
   ev.push({ t: 'end', winner: g.result.winner });
 }
+// オーナーによる強制終了。現在の今回得点で勝敗を決める（同点は引き分け）
+function endMatch(g, ev) { if (g.phase === 'ready' || g.phase === 'playing') finish(g, ev); }
 function step(g, dt, ev) {
   const s = g.settings;
-  if (g.phase === 'ready') {            // 待機中は時間を進めない（バーは動かせる）
-    g.countdown -= dt;
-    if (g.countdown <= 0) { g.phase = 'playing'; launch(g); ev.push({ t: 'go' }); }
-    return;
-  }
-  if (g.phase !== 'playing') return;
+  if (g.phase !== 'playing') return;   // 発射待ち中は時間を進めない（バーは動かせる）
   if (s.mode === 'time') g.timeLeft -= dt;   // 弾が出てからだけ減る
   if (g.queue.length) {
     g.spawnT -= dt;
     if (g.spawnT <= 0 && g.balls.length < MAX_BALLS) {
-      const q = g.queue.shift(); g.balls.push({ id: g.nid++, ...q });
+      const q = g.queue.shift();
+      if (q.srv !== undefined) { q.x = q.srv ? W - PAD - s.barW - s.ballSize : PAD + s.barW + s.ballSize; q.y = g.paddles[q.srv]; delete q.srv; }
+      g.balls.push({ id: g.nid++, ...q });
       g.spawnT = s.multInterval / 1000; ev.push({ t: 'spawn', x: q.x, y: q.y });
     }
   } else g.spawnT = 0;
@@ -136,7 +140,7 @@ function step(g, dt, ev) {
 }
 const r1 = v => Math.round(v * 10) / 10;
 function snapshot(g) {
-  return { ph: g.phase, cd: r1(g.countdown), tl: r1(g.timeLeft), sc: g.scores, pd: g.paddles.map(r1),
+  return { ph: g.phase, sv: g.serve, tl: r1(g.timeLeft), sc: g.scores, pd: g.paddles.map(r1),
     b: g.balls.map(b => [r1(b.x), r1(b.y), r1(b.vx), r1(b.vy)]), q: g.queue.length };
 }
-module.exports = { W, H, PAD, SHAPES, DEFAULTS, sanitize, createGame, setPaddle, clampPaddles, startMatch, resetScores, step, snapshot };
+module.exports = { W, H, PAD, SHAPES, DEFAULTS, sanitize, createGame, setPaddle, clampPaddles, startMatch, resetScores, step, snapshot, endMatch, serveBall };

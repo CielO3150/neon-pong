@@ -60,6 +60,15 @@ io.on('connection', sock => {
     if (r.players.length < 2 || !r.players.every(p => p.connected)) return sock.emit('err', '相手が揃っていません');
     r.ev = []; G.startMatch(r.g); emitRoom(r);
   });
+  sock.on('serve', () => {   // 発射できるのは「発射側」のプレイヤーだけ
+    const { room: r, idx } = sock.data;
+    if (r && r.g.phase === 'ready' && idx === r.g.serve && r.players.length === 2 && r.players.every(p => p.connected)) G.serveBall(r.g, r.ev);
+  });
+  sock.on('endmatch', () => {   // オーナーのみ。進行中の試合を終了
+    const { room: r, idx } = sock.data;
+    if (!r || idx !== 0 || (r.g.phase !== 'ready' && r.g.phase !== 'playing')) return;
+    G.endMatch(r.g, r.ev); io.to(r.id).emit('state', { ...G.snapshot(r.g), ev: r.ev }); r.ev = []; emitRoom(r);
+  });
   sock.on('paddle', y => { const { room: r, idx } = sock.data; if (r && typeof y === 'number') G.setPaddle(r.g, idx, y); });
   sock.on('disconnect', () => {
     const { room: r, idx } = sock.data; if (!r || !r.players[idx] || r.players[idx].sid !== sock.id) return;
