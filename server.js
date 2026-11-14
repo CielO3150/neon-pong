@@ -1,116 +1,32 @@
-const express = require("express");
-const http = require("http");
-const { Server } = require("socket.io");
-
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server);
-const PORT = process.env.PORT || 3000;
+const express=require("express"),http=require("http"),{Server}=require("socket.io");
+const app=express(),server=http.createServer(app),io=new Server(server),PORT=process.env.PORT||3000;
 app.use(express.static("public"));
-
-const rooms = new Map();
-const W = 900, H = 520, PADDLE_H = 100, BALL_R = 11;
-
-function makeRoom(code) {
-  return {
-    code, players: [], running: false, score: [0, 0],
-    paddles: [H / 2, H / 2],
-    ball: { x: W / 2, y: H / 2, vx: 0, vy: 0 },
-    lastHit: -1, countdown: 0
-  };
-}
-function resetBall(room, direction = Math.random() < .5 ? -1 : 1) {
-  room.ball = { x: W / 2, y: H / 2, vx: direction * 5.2, vy: (Math.random() * 4 - 2) };
-  room.lastHit = -1;
-}
-function publicState(room) {
-  return {
-    code: room.code, players: room.players.map(p => ({ name: p.name })),
-    score: room.score, paddles: room.paddles, ball: room.ball,
-    running: room.running, countdown: room.countdown
-  };
-}
-function emitRoom(room) { io.to(room.code).emit("state", publicState(room)); }
-
-io.on("connection", socket => {
-  socket.on("createRoom", ({ name }) => {
-    let code;
-    do { code = Math.random().toString(36).slice(2, 6).toUpperCase(); } while (rooms.has(code));
-    const room = makeRoom(code);
-    room.players.push({ id: socket.id, name: cleanName(name) });
-    rooms.set(code, room);
-    socket.join(code); socket.data.room = code; socket.data.index = 0;
-    socket.emit("joined", { code, index: 0 }); emitRoom(room);
-  });
-
-  socket.on("joinRoom", ({ code, name }) => {
-    code = String(code || "").trim().toUpperCase();
-    const room = rooms.get(code);
-    if (!room) return socket.emit("errorMessage", "そのルームコードは見つかりません。");
-    if (room.players.length >= 2) return socket.emit("errorMessage", "このルームは満員です。");
-    room.players.push({ id: socket.id, name: cleanName(name) });
-    socket.join(code); socket.data.room = code; socket.data.index = 1;
-    socket.emit("joined", { code, index: 1 });
-    room.running = true; resetBall(room); emitRoom(room);
-  });
-
-  socket.on("move", y => {
-    const room = rooms.get(socket.data.room);
-    if (!room || !Number.isFinite(y)) return;
-    const i = socket.data.index;
-    room.paddles[i] = Math.max(PADDLE_H / 2 + 8, Math.min(H - PADDLE_H / 2 - 8, y));
-  });
-
-  socket.on("launch", () => {
-    const room = rooms.get(socket.data.room);
-    if (!room || room.players.length !== 2 || room.ball.vx !== 0) return;
-    resetBall(room, Math.random() < .5 ? -1 : 1); emitRoom(room);
-  });
-
-  socket.on("disconnect", () => {
-    const code = socket.data.room, room = rooms.get(code);
-    if (!room) return;
-    room.players = room.players.filter(p => p.id !== socket.id);
-    io.to(code).emit("opponentLeft");
-    rooms.delete(code);
-  });
+const W=900,H=520,PH=104,PX=36,DEF={ballSpeed:5.2,accelerationOn:true,acceleration:1.035,mode:"rounds",limit:5,startBalls:1,multiplyBalls:false,growthMode:"add",growthAmount:1,exponential:false,ballSize:10,accent:"#55e6dc",background:"#0b1729"},rooms=new Map();
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v)),cleanName=v=>String(v||"Player").trim().slice(0,14)||"Player",hex=(v,d)=>/^#[0-9a-fA-F]{6}$/.test(String(v))?v:d;
+function roomNew(code,id,name){return{code,ownerId:id,players:[{id,name}],config:{...DEF},score:[0,0],balls:[],paddles:[H/2,H/2],paddleVelocity:[0,0],running:false,started:false,finished:false,remaining:DEF.limit,round:0,launchIndex:0,lastTick:Date.now()}}
+function pub(r){return{code:r.code,players:r.players.map(p=>({name:p.name})),ownerIndex:r.players.findIndex(p=>p.id===r.ownerId),config:r.config,score:r.score,balls:r.balls,paddles:r.paddles,running:r.running,started:r.started,finished:r.finished,remaining:r.remaining,round:r.round,launchIndex:r.launchIndex}}
+function emit(r){io.to(r.code).emit("state",pub(r))}
+function addBalls(r,n,x,y,dir,vy=0){for(let i=0;i<n;i++){let spread=n===1?0:(i-(n-1)/2)*.24;r.balls.push({x,y:clamp(y+spread*18,r.config.ballSize+2,H-r.config.ballSize-2),vx:dir*r.config.ballSpeed,vy:clamp(vy+spread*r.config.ballSpeed*.45,-r.config.ballSpeed*1.2,r.config.ballSpeed*1.2),radius:r.config.ballSize,hits:0,id:Date.now()+"-"+Math.random()})}}
+function launch(r,i){if(r.players.length!==2||r.running||r.finished)return;let dir=i===0?1:-1,x=i===0?PX+12:W-PX-12,vy=clamp(r.paddleVelocity[i]*.22,-4,4);r.balls=[];addBalls(r,r.config.startBalls,x,r.paddles[i],dir,vy);r.launchIndex=i;r.running=true;r.started=true;r.lastTick=Date.now();emit(r)}
+function reset(r){r.score=[0,0];r.balls=[];r.paddles=[H/2,H/2];r.paddleVelocity=[0,0];r.remaining=r.config.limit;r.round=0;r.running=false;r.started=false;r.finished=false;r.launchIndex=0}
+function norm(a,c){let n={...c};n.ballSpeed=clamp(+a.ballSpeed||c.ballSpeed,1,12);n.accelerationOn=!!a.accelerationOn;n.acceleration=clamp(+a.acceleration||c.acceleration,1,1.2);n.mode=a.mode==="time"?"time":"rounds";n.limit=Math.round(clamp(+a.limit||c.limit,1,n.mode==="time"?30:99));n.startBalls=Math.round(clamp(+a.startBalls||1,1,12));n.multiplyBalls=!!a.multiplyBalls;n.growthMode=a.growthMode==="multiply"?"multiply":"add";n.growthAmount=clamp(+a.growthAmount||1,1,5);n.exponential=!!a.exponential&&n.multiplyBalls&&n.startBalls>=2;n.ballSize=clamp(+a.ballSize||c.ballSize,5,22);n.accent=hex(a.accent,c.accent);n.background=hex(a.background,c.background);return n}
+io.on("connection",s=>{
+ s.on("createRoom",({name})=>{let code;do{code=Math.random().toString(36).slice(2,6).toUpperCase()}while(rooms.has(code));let r=roomNew(code,s.id,cleanName(name));rooms.set(code,r);s.join(code);s.data.room=code;s.data.index=0;s.emit("joined",{code,index:0});emit(r)});
+ s.on("joinRoom",({code,name})=>{code=String(code||"").trim().toUpperCase();let r=rooms.get(code);if(!r)return s.emit("errorMessage","そのルームコードは見つかりません。");if(r.players.length>=2)return s.emit("errorMessage","このルームは満員です。");r.players.push({id:s.id,name:cleanName(name)});s.join(code);s.data.room=code;s.data.index=1;s.emit("joined",{code,index:1});emit(r)});
+ s.on("move",y=>{let r=rooms.get(s.data.room);if(!r||!Number.isFinite(y))return;let i=s.data.index,old=r.paddles[i],v=clamp(y,PH/2+8,H-PH/2-8);r.paddleVelocity[i]=clamp(v-old,-18,18);r.paddles[i]=v});
+ s.on("ownerAction",a=>{let r=rooms.get(s.data.room);if(!r||r.ownerId!==s.id)return s.emit("errorMessage","オーナーのみ操作できます。");if(a==="start"){if(r.players.length!==2||r.finished)return;if(!r.started){r.remaining=r.config.limit;r.round=0;r.score=[0,0];launch(r,0)}else if(!r.running&&r.balls.length===0)launch(r,r.launchIndex)}else if(a==="end"){r.running=false;r.finished=true;r.balls=[];io.to(r.code).emit("matchEnded",{score:r.score})}else if(a==="reset")reset(r);emit(r)});
+ s.on("updateConfig",a=>{let r=rooms.get(s.data.room);if(!r||r.ownerId!==s.id)return s.emit("errorMessage","オーナーのみ設定できます。");if(r.running||(r.started&&!r.finished))return s.emit("errorMessage","試合中は設定を変更できません。");r.config=norm(a,r.config);if(!r.started||r.finished)r.remaining=r.config.limit;emit(r)});
+ s.on("launch",()=>{let r=rooms.get(s.data.room);if(r&&r.players.length===2&&!r.running&&!r.finished&&r.started)launch(r,r.launchIndex)});
+ s.on("disconnect",()=>{let r=rooms.get(s.data.room);if(!r)return;r.players=r.players.filter(p=>p.id!==s.id);io.to(r.code).emit("opponentLeft");rooms.delete(r.code)});
 });
-
-function cleanName(v) {
-  const s = String(v || "Player").trim().slice(0, 14);
-  return s || "Player";
-}
-
-setInterval(() => {
-  for (const room of rooms.values()) {
-    if (room.players.length !== 2) continue;
-    const b = room.ball;
-    if (b.vx === 0 && b.vy === 0) { emitRoom(room); continue; }
-    b.x += b.vx; b.y += b.vy;
-    if (b.y < BALL_R || b.y > H - BALL_R) b.vy *= -1;
-
-    // Left and right paddles deflect the shared ball.
-    if (b.vx < 0 && b.x - BALL_R <= 34 && Math.abs(b.y - room.paddles[0]) <= PADDLE_H / 2 + BALL_R) {
-      b.x = 34 + BALL_R; b.vx = Math.min(8.5, Math.abs(b.vx) * 1.035);
-      b.vy += (b.y - room.paddles[0]) * 0.075;
-    } else if (b.vx > 0 && b.x + BALL_R >= W - 34 && Math.abs(b.y - room.paddles[1]) <= PADDLE_H / 2 + BALL_R) {
-      b.x = W - 34 - BALL_R; b.vx = -Math.min(8.5, Math.abs(b.vx) * 1.035);
-      b.vy += (b.y - room.paddles[1]) * 0.075;
-    }
-
-    if (b.x < -BALL_R) {
-      room.score[1]++; resetBall(room, 1); room.ball.vx = 0; room.ball.vy = 0;
-      room.running = false; room.countdown = 2;
-    } else if (b.x > W + BALL_R) {
-      room.score[0]++; resetBall(room, -1); room.ball.vx = 0; room.ball.vy = 0;
-      room.running = false; room.countdown = 2;
-    }
-    if (room.countdown > 0) {
-      room.countdown -= 1 / 30;
-      if (room.countdown <= 0) { room.countdown = 0; room.running = true; resetBall(room); }
-    }
-    emitRoom(room);
-  }
-}, 1000 / 30);
-
-server.listen(PORT, () => console.log(`Ricochet Duel listening on ${PORT}`));
+function score(r,scorer){r.score[scorer]++;r.round++;r.balls=[];r.running=false;r.launchIndex=1-scorer;if((r.config.mode==="rounds"&&r.round>=r.config.limit)||(r.config.mode==="time"&&r.remaining<=0)){r.finished=true;io.to(r.code).emit("matchEnded",{score:r.score})}io.to(r.code).emit("pointEffect",{scorer,score:r.score,round:r.round})}
+setInterval(()=>{let now=Date.now();for(let r of rooms.values()){if(!r.running||r.players.length!==2){r.lastTick=now;continue}let dt=Math.min((now-r.lastTick)/1000,.05);r.lastTick=now;if(r.config.mode==="time"){r.remaining=Math.max(0,r.remaining-dt);if(r.remaining<=0){r.running=false;r.finished=true;r.balls=[];io.to(r.code).emit("matchEnded",{score:r.score});emit(r);continue}}
+let c=r.config;for(let j=r.balls.length-1;j>=0;j--){let b=r.balls[j];b.x+=b.vx;b.y+=b.vy;
+if(b.y-b.radius<=17){b.y=17+b.radius;b.vy=Math.abs(b.vy)}if(b.y+b.radius>=H-17){b.y=H-17-b.radius;b.vy=-Math.abs(b.vy)}
+let hit=-1;if(b.vx<0&&b.x-b.radius<=PX+8&&b.x>PX-25&&Math.abs(b.y-r.paddles[0])<=PH/2+b.radius)hit=0;
+else if(b.vx>0&&b.x+b.radius>=W-PX-8&&b.x<W-PX+25&&Math.abs(b.y-r.paddles[1])<=PH/2+b.radius)hit=1;
+if(hit===0||hit===1){b.x=hit===0?PX+8+b.radius:W-PX-8-b.radius;b.vx=(hit===0?1:-1)*Math.abs(b.vx)*(c.accelerationOn?c.acceleration:1);b.vy+=r.paddleVelocity[hit]*.16;b.hits++;if(c.multiplyBalls&&b.hits===1){let n=c.exponential?Math.min(24,r.balls.length*2):c.growthMode==="multiply"?Math.min(24,Math.ceil(r.balls.length*c.growthAmount)):Math.min(24,r.balls.length+Math.round(c.growthAmount));if(n>r.balls.length)addBalls(r,n-r.balls.length,b.x,b.y,hit===0?1:-1,b.vy)}}
+b.vx=clamp(b.vx,-12,12);b.vy=clamp(b.vy,-10,10);
+if(b.x < -b.radius||b.x>W+b.radius){let scorer=b.x<0?1:0;r.balls.splice(j,1);if(!r.balls.length){score(r,scorer);break}}
+}emit(r)}},1000/30);
+server.listen(PORT,()=>console.log("Ricochet Duel listening on "+PORT));
