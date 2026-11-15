@@ -3,7 +3,16 @@
   "version": "1.0.0",
   "description": "Realtime 1v1 online Pong with multiball",
   "main": "server.js",
-  "scripts": { "start": "node server.js", "test": "node test.js" },
-  "engines": { "node": ">=18" },
-  "dependencies": { "express": "^4.19.2", "socket.io": "^4.7.5" }
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test.js && node test-lobby.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5",
+    "ws": "^8.17.0"
+  }
 }
